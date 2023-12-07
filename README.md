@@ -1,8 +1,16 @@
 # user-engagement-analysis-home-exercise
 User Engagement Analysis Data Engineer Home Exercise
 
-Task 1
+Task 1 Data Cleaning and Transformation
 GCP ETL using Airflow for user_profiles csv file
+
+
+I created pipline based on Airflow DAG's which run's on GCP's Composer, data warehouse will be based on BigQuery with raw dataset as staged and master dataset as clean and calculated dataset ready for use
+
+So firstly user_profiles_load DAG runs which one creates master.user_profiles table, after upload's user_profiles.csv from Google Cloud Storage to BigQuery raw csv using GCSToBigQueryOperator and in the end it select's needed data from raw.user_profiles, add's engagement_duration collumn, does ifnull function for last_login_date and finishes with deduplication for user_id which is unique distinct field for this table
+
+Notice! For Visualizations of reports on user engagement insights we can use Google Data Studios, for this i have created requested by task views based on master table's from data warehouse but in this documenatation only presents examples of running those views directly in BigQuery. The same result will be on Data Studio charts which will directly connect to reporting data set which includes all the views
+
 ```python
 import logging
 import os
@@ -23,7 +31,7 @@ from schemas.user_profiles_schema import (
     user_profiles_schema_raw,
     user_profiles_schema_master,
 )
-from sql import user_profiles_sql
+from sql.user_profiles_sql import upsert_user_profiles_sql
 
 
 logger = logging.getLogger(__name__)
@@ -142,8 +150,9 @@ user_profiles_schema_master = [
     {"name": "etl_batch_date", "type": "DATE", "description": "airflow run date"},
 ]
 ```
-SQL merge query from raw to master with deduplication removal, plus null checks
-```sql
+SQL merge query from raw to master with adding engagement_duration collumn, deduplication removal, plus ifnull checks 
+```python
+upsert_user_profiles_sql = """
 MERGE {master_table} AS T
 USING (
     SELECT
@@ -183,8 +192,11 @@ WHEN NOT MATCHED THEN
         S.engagement_duration,
         S.etl_batch_date
     )
+"""
 ```
 GCP ETL using Airflow for user_events csv file
+
+In paralel user_events_load DAG runs, firstly waiting for user_profiles_load DAG to be done using ExternalTaskSensor, after it the workflow kinda same, it creates master.user_events table, after upload's user_events.csv from Google Cloud Storage to BigQuery raw csv using GCSToBigQueryOperator and in the end it select's needed data from raw.user_profiles, add's engagement_duration collumn and finishes with deduplication for event_id which is unique distinct field for this table
 ```python
 import logging
 import os
@@ -207,7 +219,7 @@ from schemas.user_events_schema import (
     user_events_schema_raw,
     user_events_schema_master,
 )
-from sql import user_events_sql
+from sql.user_events_sql import upsert_user_events_sql
 
 
 logger = logging.getLogger(__name__)
@@ -217,7 +229,7 @@ file_name = f"user_events.csv"
 blob_name = "data/test/"
 
 dag_args = {
-    'owner': 'Yurii Yatsiv',
+    'owner': 'Yurii',
     'name': 'user_events_load',
     'description': 'user_events_load',
     'tags': ['user_events'],
@@ -341,7 +353,8 @@ user_profiles_schema_master = [
 ]
 ```
 SQL merge query from raw to master with deduplication removal
-```sql
+```python
+upsert_user_events_sql = """
 MERGE {master_table} AS T
 USING (
     SELECT
@@ -387,11 +400,13 @@ WHEN NOT MATCHED THEN
         S.page,
         S.etl_batch_date
     )
+"""
 ```
 Task 2
 For Engagement Analysis i would prefer to use Bigquery views to analis the data
 
 2.1 - Calculate the daily active users (DAU) and monthly active users (MAU)
+
 DAU
 ```sql
 CREATE OR REPLACE VIEW reporting.dau
@@ -399,12 +414,9 @@ AS
 SELECT
   DATE(event_date) AS date,
   COUNT(DISTINCT user_id) AS dau
-FROM
-  master.user_events
-GROUP BY
-  date
-ORDER BY
-  date;
+FROM master.user_events
+GROUP BY date
+ORDER BY date;
 ```
 ![Screenshot 2023-12-07 at 17 35 52](https://github.com/Lemberg14/user-engagement-analysis-home-exercise/assets/48790931/d761781a-f742-4c83-8b55-7cd532caa0ab)
 
@@ -416,12 +428,9 @@ SELECT
   EXTRACT(YEAR FROM event_date) AS year,
   EXTRACT(MONTH FROM event_date) AS month,
   COUNT(DISTINCT user_id) AS mau
-FROM
-  master.user_events
-GROUP BY
-  year, month
-ORDER BY
-  year, month;
+FROM master.user_events
+GROUP BY year, month
+ORDER BY year, month;
 ```
 ![Screenshot 2023-12-07 at 17 35 01](https://github.com/Lemberg14/user-engagement-analysis-home-exercise/assets/48790931/a5ad85e5-fa2a-4730-920a-22df6ddbac8d)
 
@@ -431,9 +440,9 @@ CREATE OR REPLACE VIEW reporting.most_engaged_users
 AS
 SELECT user_id,
        Count(event_id) AS events_count
-from master.user_events
-group by user_id
-order by events_count DESC
+FROM master.user_events
+GROUP BY user_id
+ORDER BY events_count DESC
 limit 5;
 ```
 ![Screenshot 2023-12-07 at 17 34 10](https://github.com/Lemberg14/user-engagement-analysis-home-exercise/assets/48790931/13b9404e-1b28-4301-a158-d5aa3d370106)
@@ -447,12 +456,9 @@ SELECT
   COUNT(*) AS event_count,
   EXTRACT(YEAR FROM event_date) AS year,
   EXTRACT(MONTH FROM event_date) AS month
-FROM
-  master.user_events
-GROUP BY
-  event_type, year, month
-ORDER BY
-  event_count DESC;
+FROM master.user_events
+GROUP BY event_type, year, month
+ORDER BY event_count DESC;
 ```
 ![Screenshot 2023-12-07 at 17 33 05](https://github.com/Lemberg14/user-engagement-analysis-home-exercise/assets/48790931/50cf3bdf-ed3c-4805-93c3-2f8e3af1f271)
 
@@ -466,28 +472,26 @@ WITH UserEngagementTimeline AS (
   SELECT
     ue.user_id,
     ue.event_date,
-    ue.event_type,
-    DATE_DIFF(DATE(ue.event_date), up.signup_date, WEEK) AS weeks_after_signup
-  FROM
-    master.user_events ue
-  JOIN
-    master.user_profiles up
-  ON
-    ue.user_id = up.user_id
+    DATE_DIFF(DATE(ue.event_date), up.signup_date, WEEK) AS weeks_since_signup,
+    COUNT(ue.event_id) AS events_count
+  FROM master.user_events ue
+  JOIN master.user_profiles up ON ue.user_id = up.user_id
+  GROUP BY ue.user_id,  up.signup_date, ue.event_date
 )
 
 SELECT
-  weeks_after_signup,
-  COUNT(DISTINCT user_id) AS new_users,
-  COUNT(*) AS total_events
+  up.user_id,
+  weeks_since_signup,
+  IFNULL(SUM(events_count), 0) AS events_count
 FROM
-  UserEngagementTimeline
-GROUP BY
-  weeks_after_signup
-ORDER BY
-  weeks_after_signup;
+  (SELECT DISTINCT user_id, signup_date FROM raw.user_profiles) up
+LEFT JOIN
+  UserEngagementTimeline uet ON up.user_id = uet.user_id
+GROUP BY weeks_since_signup, up.user_id
+ORDER BY user_id, weeks_since_signup DESC;
 ```
-![Screenshot 2023-12-07 at 17 31 52](https://github.com/Lemberg14/user-engagement-analysis-home-exercise/assets/48790931/129b2c36-48ba-4dea-9017-48d5acf18f61)
+![Screenshot 2023-12-07 at 19 23 52](https://github.com/Lemberg14/user-engagement-analysis-home-exercise/assets/48790931/adfa40c5-2717-4014-9c9b-d5791a93e50b)
+
 
 3.2 - Identify any patterns or anomalies in user engagement, such as drop-offs or spikes in activity.
 ```sql
@@ -501,12 +505,8 @@ WITH UserActivity AS (
     ue.event_type,
     up.signup_date,
     up.last_login_date
-  FROM
-    master.user_events ue
-  JOIN
-    master.user_profiles up
-  ON
-    ue.user_id = up.user_id
+  FROM master.user_events ue
+  JOIN master.user_profiles up ON ue.user_id = up.user_id
 ),
 
 CountedUserActivity AS (
@@ -515,11 +515,8 @@ SELECT
   COUNT(DISTINCT ua.user_id) AS active_users,
   COUNT(ua.event_id) AS total_events
 FROM UserActivity ua
-GROUP BY
-  date
-ORDER BY
-  date
-  
+GROUP BY date
+ORDER BY date  
 )
 
 SELECT
@@ -528,10 +525,8 @@ SELECT
   total_events,
 FROM CountedUserActivity cua
 WHERE active_users > total_events OR total_events >= 3 * active_users
-GROUP BY
-  date, active_users, total_events
-ORDER BY
-  date, active_users, total_events;
+GROUP BY date, active_users, total_events
+ORDER BY date, active_users, total_events;
 ```
 ![Screenshot 2023-12-07 at 17 29 54](https://github.com/Lemberg14/user-engagement-analysis-home-exercise/assets/48790931/dc30e731-cf5c-4bed-b5a0-50b1b8ae2738)
 
@@ -547,22 +542,17 @@ WITH UserEventSequence AS (
     ue.event_type,
     ue.event_date,
     LEAD(ue.event_type) OVER (PARTITION BY ue.user_id ORDER BY ue.event_date) AS next_event_type
-  FROM
-    master.user_events ue
-  ORDER BY
-    ue.user_id, ue.event_date
+  FROM master.user_events ue
+  ORDER BY ue.user_id, ue.event_date
 )
 
 SELECT
   ues.event_type,
   ues.next_event_type,
   COUNT(*) AS event_count
-FROM
-  UserEventSequence ues
-GROUP BY
-  ues.event_type, ues.next_event_type
-ORDER BY
-  event_count DESC;
+FROM UserEventSequence ues
+GROUP BY ues.event_type, ues.next_event_type
+ORDER BY event_count DESC;
 ```
 ![Screenshot 2023-12-07 at 17 28 23](https://github.com/Lemberg14/user-engagement-analysis-home-exercise/assets/48790931/65c06fae-3f60-4efc-8a3e-244e32c84fd6)
 
@@ -575,21 +565,15 @@ WITH UserPageViews AS (
     ue.user_id,
     ue.page,
     COUNT(ue.event_id) AS page_views
-  FROM
-    master.user_events ue
-  GROUP BY
-    ue.user_id,
-    ue.page
+  FROM master.user_events ue
+  GROUP BY ue.user_id, ue.page
 )
 
 SELECT
   upv.page,
   SUM(upv.page_views) AS total_page_views
-FROM
-  UserPageViews upv
-GROUP BY
-  upv.page
-ORDER BY
-  total_page_views DESC;
+FROM UserPageViews upv
+GROUP BY upv.page
+ORDER BY total_page_views DESC;
 ```
 ![Screenshot 2023-12-07 at 17 27 28](https://github.com/Lemberg14/user-engagement-analysis-home-exercise/assets/48790931/79cbdc9e-ab05-4479-97d8-130c482309c5)
