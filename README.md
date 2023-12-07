@@ -1,13 +1,15 @@
 # user-engagement-analysis-home-exercise
 User Engagement Analysis Data Engineer Home Exercise
 
+link to the task https://ritualapp.notion.site/Data-Engineer-Home-Exercise-32c0cecba15f4bf1a0c134226cc43cc3
+
 Task 1 Data Cleaning and Transformation
 GCP ETL using Airflow for user_profiles csv file
 
 
-I created pipline based on Airflow DAG's which run's on GCP's Composer, data warehouse will be based on BigQuery with raw dataset as staged and master dataset as clean and calculated dataset ready for use
+I created pipline based on Airflow DAG's which run on GCP's Composer, data warehouse will be based on BigQuery with raw dataset as staged and master dataset as clean and calculated dataset ready for use
 
-So firstly user_profiles_load DAG runs which one creates master.user_profiles table, after upload's user_profiles.csv from Google Cloud Storage to BigQuery raw csv using GCSToBigQueryOperator and in the end it select's needed data from raw.user_profiles, add's engagement_duration collumn, does ifnull function for last_login_date and finishes with deduplication for user_id which is unique distinct field for this table
+So firstly user_profiles_load DAG runs which one creates master.user_profiles table, after uploads user_profiles.csv from Google Cloud Storage to BigQuery raw csv using GCSToBigQueryOperator and in the end it selects needed data from raw.user_profiles, adds engagement_duration collumn, does ifnull function for last_login_date and finishes with deduplication for user_id which is unique distinct field for this table
 
 Notice! For Visualizations of reports on user engagement insights we can use Google Data Studios, for this i have created requested by task views based on master table's from data warehouse but in this documenatation only presents examples of running those views directly in BigQuery. The same result will be on Data Studio charts which will directly connect to reporting data set which includes all the views
 
@@ -196,7 +198,7 @@ WHEN NOT MATCHED THEN
 ```
 GCP ETL using Airflow for user_events csv file
 
-In paralel user_events_load DAG runs, firstly waiting for user_profiles_load DAG to be done using ExternalTaskSensor, after it the workflow kinda same, it creates master.user_events table, after upload's user_events.csv from Google Cloud Storage to BigQuery raw csv using GCSToBigQueryOperator and in the end it select's needed data from raw.user_profiles, add's engagement_duration collumn and finishes with deduplication for event_id which is unique distinct field for this table
+In paralel user_events_load DAG runs, firstly waiting for user_profiles_load DAG to be done using ExternalTaskSensor, after it the workflow kinda same, it creates master.user_events table, after uploads user_events.csv from Google Cloud Storage to BigQuery raw csv using GCSToBigQueryOperator and in the end it selects needed data from raw.user_profiles, adds engagement_duration collumn and finishes with deduplication for event_id which is unique distinct field for this table
 ```python
 import logging
 import os
